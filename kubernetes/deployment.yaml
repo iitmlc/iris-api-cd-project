@@ -1,0 +1,38 @@
+# kubernetes/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iris-api-deployment # Make this consistent
+  labels:
+    app: iris-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iris-api
+  template:
+    metadata:
+      labels:
+        app: iris-api
+    spec:
+      containers:
+      - name: iris-api-container # Make this consistent
+        image: us-central1-docker.pkg.dev/tidy-fort-461206-j8/my-repo/iris-api:latest # This will be the initial image
+        ports:
+        - containerPort: 8200
+      # serviceAccountName: default # Uncomment if you need specific K8s SA permissions
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: iris-api-service # This will map to your LoadBalancer service name
+spec:
+  selector:
+    app: iris-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8200
+  type: LoadBalancer

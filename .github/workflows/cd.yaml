@@ -1,0 +1,75 @@
+# .github/workflows/cd.yaml
+name: CD - Deploy Iris API to GKE
+
+on:
+  push:
+    branches:
+      - main # Trigger on pushes to the main branch
+    paths:
+      - 'iris_fastapi.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'model_dt.lib'
+      - 'kubernetes/*'
+
+env:
+  PROJECT_ID: tidy-fort-461206-j8 # <<< YOUR PROJECT ID
+  REGION: us-central1
+  CLUSTER_NAME: autopilot-cluster-1
+  REPOSITORY_NAME: my-repo
+  IMAGE_NAME: iris-api
+  SERVICE_ACCOUNT_EMAIL: model-uploader@tidy-fort-461206-j8.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Required for Workload Identity Federation, or for gcloud auth
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: Configure Docker to use gcloud as a credential helper
+        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+      - name: Build Docker Image
+        run: docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest .
+
+      - name: Push Docker Image to Artifact Registry
+        run: docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest
+
+      - name: Get GKE credentials
+        run: gcloud container clusters get-credentials ${CLUSTER_NAME} --zone ${REGION} --project ${PROJECT_ID}
+
+      - name: Deploy to GKE
+        run: |
+          # Ensure 'iris-api-deployment' is the 'metadata.name' from your kubernetes/deployment.yaml
+          # Ensure 'iris-api-container' is the 'name' of your container in the deployment.yaml
+          kubectl set image deployment/iris-api-deployment iris-api-container=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest
+
+      - name: Verify Deployment (Optional)
+        run: kubectl rollout status deployment/iris-api-deployment --timeout=5m
+
+      # CML Reporting (Optional)
+      - name: Install CML
+        run: npm install -g @dvcorg/cml
+
+      - name: Report Deployment Status
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Deployment to GKE Complete!" > report.md
+          echo "### Application URL:" >> report.md
+          echo "$(kubectl get service iris-api-service -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')" >> report.md
+          cml comment create report.md
