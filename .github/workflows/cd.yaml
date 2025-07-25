@@ -24,8 +24,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
+      contents: 'write'
       id-token: 'write' # Required for Workload Identity Federation, or for gcloud auth
+      pull-requests: 'write' # Ensure this is here and correctly indented
+      issues: 'write'        # Add this for CML comments on issues/commits
 
     steps:
       - name: Checkout repository
