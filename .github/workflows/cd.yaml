@@ -11,30 +11,21 @@ on:
       - 'Dockerfile'
       - 'model_dt.lib'
       - 'kubernetes/*'
-  
-  # --- NEW: Add workflow_dispatch trigger ---
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Docker image tag to deploy (e.g., latest, commit-sha)'
-        required: false
-        default: 'latest' # Default to 'latest' if no tag is provided
 
 env:
-  PROJECT_ID: tidy-fort-461206-j8 # Replace with your actual project ID
+  PROJECT_ID: tidy-fort-461206-j8 # <<< YOUR PROJECT ID
   REGION: us-central1
   CLUSTER_NAME: autopilot-cluster-1
   REPOSITORY_NAME: my-repo
   IMAGE_NAME: iris-api
-  SERVICE_ACCOUNT_EMAIL: myml@tidy-fort-461206-j8.iam.gserviceaccount.com
+  SERVICE_ACCOUNT_EMAIL: model-uploader@tidy-fort-461206-j8.iam.gserviceaccount.com
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: 'write'       # Explicitly grant write for CML and potential image tagging
-      id-token: 'write'       # Required for Workload Identity Federation, or for gcloud auth
-      pull-requests: 'write'  # Explicitly grant write for CML to comment on PRs
+      contents: 'read'
+      id-token: 'write' # Required for Workload Identity Federation, or for gcloud auth
 
     steps:
       - name: Checkout repository
@@ -52,43 +43,25 @@ jobs:
       - name: Configure Docker to use gcloud as a credential helper
         run: gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
-      # Determine the image tag to use
-      - name: Set image tag for deployment
-        id: set_image_tag
-        run: |
-          # If triggered by push, use commit SHA. If by dispatch, use input tag or default.
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            echo "IMAGE_TO_DEPLOY=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_ENV
-            echo "DISPLAY_TAG=${{ github.sha }}" >> $GITHUB_ENV
-          else # workflow_dispatch
-            echo "IMAGE_TO_DEPLOY=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
-            echo "DISPLAY_TAG=${{ github.event.inputs.image_tag }}" >> $GITHUB_ENV
-          fi
-
       - name: Build Docker Image
-        # Always build the 'latest' and commit SHA tags for consistency
-        run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.IMAGE_NAME }}:latest .
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+        run: docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest .
 
       - name: Push Docker Image to Artifact Registry
-        # Push both 'latest' and commit SHA tags
-        run: |
-          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/${{ IMAGE_NAME }}:${{ github.sha }}
+        run: docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest
 
       - name: Get GKE credentials
         run: gcloud container clusters get-credentials ${CLUSTER_NAME} --zone ${REGION} --project ${PROJECT_ID}
 
       - name: Deploy to GKE
         run: |
-          # Use the determined image tag for deployment
-          kubectl set image deployment/iris-api-deployment iris-api-container=${{ env.IMAGE_TO_DEPLOY }} --namespace=default
+          # Ensure 'iris-api-deployment' is the 'metadata.name' from your kubernetes/deployment.yaml
+          # Ensure 'iris-api-container' is the 'name' of your container in the deployment.yaml
+          kubectl set image deployment/iris-api-deployment iris-api-container=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY_NAME}/${IMAGE_NAME}:latest
 
       - name: Verify Deployment (Optional)
         run: kubectl rollout status deployment/iris-api-deployment --timeout=5m
 
-      # CML Reporting
+      # CML Reporting (Optional)
       - name: Install CML
         run: npm install -g @dvcorg/cml
 
@@ -97,7 +70,6 @@ jobs:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "## Deployment to GKE Complete!" > report.md
-          echo "### Deployed Image: `${{ env.DISPLAY_TAG }}`" >> report.md
-          echo "### Application URL: $(kubectl get service iris-api-service -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')" >> report.md
+          echo "### Application URL:" >> report.md
+          echo "$(kubectl get service iris-api-service -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')" >> report.md
           cml comment create report.md
-
