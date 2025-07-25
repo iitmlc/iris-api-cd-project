@@ -40,6 +40,10 @@ jobs:
       - name: Set up Cloud SDK
         uses: 'google-github-actions/setup-gcloud@v2'
 
+      # --- NEW STEP: Install gke-gcloud-auth-plugin ---
+      - name: Install gke-gcloud-auth-plugin
+        run: gcloud components install gke-gcloud-auth-plugin
+
       - name: Configure Docker to use gcloud as a credential helper
         run: gcloud auth configure-docker ${REGION}-docker.pkg.dev
 
